@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: kube-operator2dir
+    app.kubernetes.io/managed-by: kustomize
+  name: system
+---
+# The operator runs as a DaemonSet, NOT a Deployment: every node runs an
+# agent that materializes DirTree trees onto that node's filesystem via the
+# hostPath mount below. A single-pod controller would only see its own
+# container filesystem and is the wrong place for node-local writes.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: controller-manager
+  namespace: system
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: kube-operator2dir
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+      app.kubernetes.io/name: kube-operator2dir
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        control-plane: controller-manager
+        app.kubernetes.io/name: kube-operator2dir
+    spec:
+      # Manage every node, including control-plane (tainted) nodes: a tree
+      # may legitimately target them.
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - command:
+        - /manager
+        args:
+        - --health-probe-bind-address=:8081
+        - --node-name=$(NODE_NAME)
+        - --host-root=/host
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        image: controller:latest
+        name: manager
+        ports:
+        - containerPort: 8081
+          name: health
+          protocol: TCP
+        securityContext:
+          # Node-filesystem writes (including chown to arbitrary uid/gid from
+          # the CR spec) require root with a minimal capability set. This is
+          # the component's core function, not a misconfiguration.
+          runAsNonRoot: false
+          runAsUser: 0
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - "ALL"
+            add:
+            - CHOWN
+            - DAC_OVERRIDE
+            - FOWNER
+            - FSETID
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        # TODO(user): Configure the resources accordingly based on the project requirements.
+        # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        volumeMounts:
+        - name: host-root
+          mountPath: /host
+      volumes:
+      # The node root filesystem: DirTree spec.rootDir is resolved under
+      # this mount. Blast radius: whoever can create DirTree CRs can write
+      # anywhere on the node — keep the CRD cluster-scoped and access to it
+      # restricted (see README).
+      - name: host-root
+        hostPath:
+          path: /
+          mountPropagation: HostToContainer
+      serviceAccountName: controller-manager
+      terminationGracePeriodSeconds: 10

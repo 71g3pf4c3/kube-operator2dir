@@ -1,0 +1,28 @@
+apiVersion: ops.operator2dir/v1alpha1
+kind: DirTree
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-operator2dir
+    app.kubernetes.io/managed-by: kustomize
+  name: dirtree-sample
+spec:
+  # Absolute path ON THE NODE (resolved under the agent's /host mount).
+  rootDir: /etc/operator2dir-example
+  # Only nodes carrying these labels are managed. Never implicit all-nodes.
+  nodeSelector:
+    example.com/dirtree: "true"
+  # json2dir encoding: object=dir, string=file, [link,target]=symlink,
+  # [script,content]=executable file.
+  tree:
+    greeting: "Hello, world!"
+    dir:
+      subfile: "Content.\n"
+      subdir: {}
+    symlink: ["link", "/etc/hostname"]
+    script: ["script", "#!/bin/sh\necho Howdy!"]
+  # Optional ownership model.
+  # fileMode: "0644"
+  # scriptMode: "0755"
+  # dirMode: "0755"
+  # uid: 1000
+  # gid: 1000

@@ -1,0 +1,188 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: dirtrees.ops.operator2dir
+spec:
+  group: ops.operator2dir
+  names:
+    kind: DirTree
+    listKind: DirTreeList
+    plural: dirtrees
+    singular: dirtree
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          DirTree is the Schema for the dirtrees API: it declaratively materializes
+          a json2dir-encoded directory tree onto the filesystems of selected nodes.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of DirTree
+            properties:
+              dirMode:
+                description: |-
+                  dirMode is the permission bits (octal string) applied to directories.
+                  Defaults to "0755".
+                pattern: ^0[0-7]{3}$
+                type: string
+              fileMode:
+                description: |-
+                  fileMode is the permission bits (octal string, e.g. "0644") applied to
+                  regular files. Defaults to "0644".
+                pattern: ^0[0-7]{3}$
+                type: string
+              gid:
+                description: |-
+                  gid is the owner GID applied to all materialized entries. When unset,
+                  ownership is left to the creating process (no chown).
+                format: int32
+                minimum: 0
+                type: integer
+              nodeSelector:
+                additionalProperties:
+                  type: string
+                description: |-
+                  nodeSelector is a label selector (equality-based) picking the nodes this
+                  tree applies to. Only nodes whose labels match every key/value pair
+                  here are managed. An empty selector is rejected: a tree never applies
+                  to all nodes implicitly.
+                minProperties: 1
+                type: object
+              rootDir:
+                description: |-
+                  rootDir is the absolute path ON THE NODE under which the tree is
+                  materialized. The operator DaemonSet mounts the host root filesystem
+                  (hostPath / at /host), so this path is resolved relative to that mount.
+
+                  rootDir is fully owned by this CR: any pre-existing content under it is
+                  replaced, and pruning (spec changes and CR deletion) removes entries the
+                  spec no longer defines.
+                minLength: 2
+                pattern: ^/
+                type: string
+                x-kubernetes-validations:
+                - message: rootDir must not be the filesystem root
+                  rule: self != '/'
+              scriptMode:
+                description: |-
+                  scriptMode is the permission bits (octal string) applied to executable
+                  files ("script" entries). Defaults to "0755".
+                pattern: ^0[0-7]{3}$
+                type: string
+              tree:
+                description: |-
+                  tree is the json2dir-encoded directory tree (see
+                  https://github.com/alurm/json2dir):
+
+                    - a JSON object is a directory; its keys are single-segment entry names;
+                    - a string value is a regular file with that content;
+                    - ["link", "<target>"] is a symlink to <target>;
+                    - ["script", "<content>"] is an executable file with <content>.
+
+                  Keys containing "/", the keys "." and "..", and non-object roots are
+                  rejected (reported via status per node). File content is UTF-8 only;
+                  binary content is not supported.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              uid:
+                description: |-
+                  uid is the owner UID applied to all materialized entries. When unset,
+                  ownership is left to the creating process (no chown).
+                format: int32
+                minimum: 0
+                type: integer
+            required:
+            - nodeSelector
+            - rootDir
+            - tree
+            type: object
+          status:
+            description: status defines the observed state of DirTree
+            properties:
+              nodes:
+                additionalProperties:
+                  description: |-
+                    DirTreeNodeStatus is the observed state of a DirTree on one node, reported
+                    by that node's agent. Each agent patches only its own entry.
+                  properties:
+                    lastAppliedHash:
+                      description: |-
+                        lastAppliedHash is a hash of the canonicalized tree last successfully
+                        materialized on this node.
+                      type: string
+                    lastTransitionTime:
+                      description: lastTransitionTime is the last time phase changed.
+                      format: date-time
+                      type: string
+                    message:
+                      description: message is a human-readable detail for the current
+                        phase.
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration is the metadata.generation most recently reconciled
+                        by this node's agent.
+                      format: int64
+                      type: integer
+                    phase:
+                      description: |-
+                        phase is this node's reconciliation state:
+                        - "Ready": tree materialized and matching the spec;
+                        - "Progressing": materialization in progress (reserved);
+                        - "InvalidSpec": the tree failed validation (see message);
+                        - "Error": materialization failed (see message);
+                        - "Pruned": the local tree was removed as part of CR deletion.
+                      enum:
+                      - Ready
+                      - Progressing
+                      - InvalidSpec
+                      - Error
+                      - Pruned
+                      type: string
+                    pruned:
+                      description: |-
+                        pruned is true once this node has pruned its local copy of the tree
+                        during CR deletion.
+                      type: boolean
+                  required:
+                  - lastTransitionTime
+                  - observedGeneration
+                  - phase
+                  type: object
+                description: |-
+                  nodes holds per-node status, keyed by node name. Each node's agent
+                  patches only its own key. Entries for nodes that no longer match
+                  nodeSelector are not authoritative and are eventually dropped by the
+                  agents.
+                type: object
+                x-kubernetes-map-type: granular
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

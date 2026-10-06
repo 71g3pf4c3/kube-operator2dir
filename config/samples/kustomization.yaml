@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- ops_v1alpha1_dirtree.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
